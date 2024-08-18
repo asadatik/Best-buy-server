@@ -3,8 +3,6 @@ const app = express();
 require('dotenv').config();
 
 const { MongoClient, ServerApiVersion } = require('mongodb');
-
-
 const cors = require('cors');
 const port = process.env.PORT || 9000;
 
@@ -12,6 +10,7 @@ const port = process.env.PORT || 9000;
 app.use(cors());
 app.use(express.json());
 
+// MongoDB connection URI
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.ldjypij.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
@@ -25,20 +24,19 @@ const client = new MongoClient(uri, {
 
 async function run() {
   try {
+    // Connect to MongoDB
     await client.connect();
 
     const productsCollection = client.db('JOB-TASK').collection('shopSort');
     const userCollection = client.db('JOB-TASK').collection('users');
-    const priceCollection = client.db('JOB-TASK').collection('price');
 
-    // Get all products
+    // Route to get all products
     app.get('/allPro', async (req, res) => {
       const result = await productsCollection.find().toArray();
       res.send(result);
     });
 
-      
-    // Post user info
+    // Route to post user info
     app.post('/users', async (req, res) => {
       const user = req.body;
       console.log(user);
@@ -51,92 +49,63 @@ async function run() {
       res.send(result);
     });
 
-  
-       
-      
-    app.get("/products", async (req, res) => {
-      const page = parseInt(req.query.page);
-      const testData = JSON.parse(req.query.testData);
-      console.log(testData);
-      let query = {};
-      if (testData.search) {
-        query = { name: { $regex: testData.search, $options: "i" } };
-      }
-      if (testData.brand.length > 0) {
-        query.brand = { $in: testData.brand };
-      }
-      if (testData.category.length > 0) {
-        query.category = { $in: testData.category };
-      }
 
-      if (testData.priceSelected.length === 2) {
-        query.price = {
-          $gte: Number(testData.priceSelected[0]),
-          $lte: Number(testData.priceSelected[1]),
+
+    // Route for advanced filtering, sorting, and pagination
+    app.get('/information', async (req, res) => {
+      try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
+
+        const sortField = req.query.sort || 'createdAt'; // Assuming you have a `createdAt` field
+        const sortOrder = req.query.order === 'desc' ? -1 : 1;
+
+        const searchQuery = req.query.search
+          ? { name: { $regex: new RegExp(req.query.search, 'i') } }
+          : {};
+
+        const filters = {
+          ...searchQuery,
+          ...(req.query.brand && { brand: req.query.brand }),
+          ...(req.query.category && { category: req.query.category }),
+          ...(req.query.minPrice && { price: { $gte: parseFloat(req.query.minPrice) } }),
+          ...(req.query.maxPrice && { price: { $lte: parseFloat(req.query.maxPrice) } }),
         };
+
+        const totalDocuments = await productsCollection.countDocuments(filters);
+        const data = await productsCollection
+          .find(filters)
+          .sort({ [sortField]: sortOrder })
+          .skip(skip)
+          .limit(limit)
+          .toArray();
+
+        res.send({
+          data,
+          currentPage: page,
+          totalPages: Math.ceil(totalDocuments / limit),
+          totalDocuments,
+        });
+      } catch (error) {
+        console.error('Error fetching data:', error);
+        res.status(500).send({ error: 'An error occurred while fetching data.' });
       }
-
-      let sortPrice = {};
-
-      if (testData.sortPrice === "low") {
-        sortPrice.price = 1;
-      } else if (testData.sortPrice === "high") {
-        sortPrice.price = -1;
-      }
-
-      if (testData.dateSort) {
-        sortPrice.time = -1;
-    } else if (testData.dateSort === false) {
-      sortPrice.time = 1;
-    }
-
-    const totalClasses = await productsCollection.countDocuments(query);
-
-      const result = await productsCollection
-        .find(query)
-        .sort(sortPrice)
-        .skip(page * 6)
-        .limit(6)
-        .toArray();
-      res.send({ result, totalClasses });
     });
 
-    app.get("/filter", async (req, res) => {
-      const brands = await productsCollection
-        .aggregate([{ $group: { _id: "$brand" } }, { $sort: { _id: 1 } }])
-        .toArray();
-
-      res.send(brands);
-    });
-    app.get("/filter2", async (req, res) => {
-      const categories = await productsCollection
-        .aggregate([{ $group: { _id: "$category" } }, { $sort: { _id: 1 } }])
-        .toArray();
-
-      res.send(categories);
-    });
-    app.get("/filter3", async (req, res) => {
-      const categories = await priceCollection
-        .aggregate([{ $group: { _id: "$price" } }, { $sort: { _id: 1 } }])
-        .toArray();
-      res.send(categories);
-    });
-
-
-
-
-
-    console.log("Pinged your deployment. You successfully connected to MongoDB!");
   } finally {
     // No need to close the connection because it will stay open as long as the app is running
   }
 }
+
 run().catch(console.dir);
 
+// Basic route to check server status
 app.get('/', (req, res) => {
   res.send('Selling is Starting');
 });
 
+// Start the server
 app.listen(port, () => {
   console.log(`Selling is sitting on port ${port}`);
 });
